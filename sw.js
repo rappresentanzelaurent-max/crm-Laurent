@@ -1,4 +1,4 @@
-const CACHE = 'laurent-crm-offline-v1';
+const CACHE = 'laurent-crm-offline-v2-professional-pdf';
 const APP = ['./', './index.html'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP)).then(() => self.skipWaiting()));
