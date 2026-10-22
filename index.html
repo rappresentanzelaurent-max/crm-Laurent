@@ -4,10 +4,10 @@
 const seed=JSON.parse(document.getElementById('seed').textContent);
 const KEY='laurent-crm-v1', COMPACT_KEY='laurent-crm-compact-v2';
 function reconstruct(saved){
- if(!saved)return {clients:seed.clients,visits:seed.visits,invoices:[]};
+ if(!saved)return {clients:JSON.parse(JSON.stringify(seed.clients)),visits:JSON.parse(JSON.stringify(seed.visits)),invoices:[]};
  if(saved.format===3)return saved.data;
  if(saved.format!==2)return saved;
- const clients=seed.clients.slice(),visits=seed.visits.slice();
+ const clients=JSON.parse(JSON.stringify(seed.clients)),visits=JSON.parse(JSON.stringify(seed.visits));
  for(const [idx,value] of saved.clientChanges||[])clients[idx]=value;
  for(const [idx,value] of saved.visitChanges||[])visits[idx]=value;
  clients.push(...(saved.newClients||[]));visits.push(...(saved.newVisits||[]));
@@ -27,8 +27,32 @@ let tab='home',selected=null,filter='',zone='Tutte',year='2026';const $=s=>docum
 function openArchive(){return new Promise((resolve,reject)=>{if(!window.indexedDB)return reject(Error('IndexedDB non disponibile'));const r=indexedDB.open('laurent-crm-archive',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('records'))r.result.createObjectStore('records')};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
 function archiveRead(){return new Promise((resolve,reject)=>{const t=archiveDB.transaction('records','readonly');const r=t.objectStore('records').get('current');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
 function archiveWrite(value){return new Promise((resolve,reject)=>{const t=archiveDB.transaction('records','readwrite');t.objectStore('records').put(value,'current');t.oncomplete=resolve;t.onerror=()=>reject(t.error);t.onabort=()=>reject(t.error)})}
-const save=()=>{const snapshot=compactData();if(!archiveReady){document.getElementById('notice').textContent='Preparazione archivio: salvataggio in coda'}saveQueue=saveQueue.catch(()=>{}).then(async()=>{try{if(archiveDB){await archiveWrite(snapshot)}else{localStorage.setItem(COMPACT_KEY,JSON.stringify(snapshot))}document.getElementById('notice').textContent='Salvato sul dispositivo · '+new Date().toLocaleTimeString('it-IT')}catch(e){document.getElementById('notice').textContent='ATTENZIONE: salvataggio non riuscito';alert('Salvataggio non riuscito: '+e.message+'. Esporta un backup JSON.')}})};
-window.addEventListener('load',async()=>{try{archiveDB=await openArchive();const saved=await archiveRead();if(saved){db=reconstruct(saved)}else{await archiveWrite(compactData())}document.getElementById('notice').textContent='Archivio locale pronto · IndexedDB'}catch(e){archiveDB=null;document.getElementById('notice').textContent='Archivio di riserva · verifica il salvataggio'}finally{archiveReady=true;render()}});const nice=d=>d?d.split('-').reverse().join('/'):'';const today=()=>new Date().toISOString().slice(0,10);const client=id=>db.clients.find(x=>x.id===id);const hist=id=>db.visits.filter(x=>x.clientId===id).sort((a,b)=>b.date.localeCompare(a.date));const last=id=>hist(id)[0]?.date||'';const lastOrder=id=>hist(id).find(v=>v.order===1)?.date||'';const days=d=>d?Math.floor((new Date(today())-new Date(d))/86400000):null;
+const PENDING_SAVE_KEY='laurent-crm-pending-save-v1';
+function pendingSave(){try{const raw=localStorage.getItem(PENDING_SAVE_KEY);if(!raw)return null;const record=JSON.parse(raw);const data=reconstruct(record.snapshot);if(!data||!Array.isArray(data.clients)||!Array.isArray(data.visits)||!Array.isArray(data.invoices))return null;return {raw,data}}catch(e){return null}}
+function clearPendingSave(raw){try{if(localStorage.getItem(PENDING_SAVE_KEY)===raw)localStorage.removeItem(PENDING_SAVE_KEY)}catch(e){}}
+const save=()=>{
+ /* Distacca la copia dalla memoria e registra subito le modifiche prima della scrittura asincrona. */
+ const encoded=JSON.stringify({snapshot:compactData(),id:Date.now().toString(36)+Math.random().toString(36).slice(2)});
+ const snapshot=JSON.parse(encoded).snapshot;
+ let immediate=false;try{localStorage.setItem(PENDING_SAVE_KEY,encoded);immediate=true}catch(e){}
+ document.getElementById('notice').textContent=immediate?'Modifiche protette · salvataggio in corso…':'Salvataggio in corso…';
+ saveQueue=saveQueue.catch(()=>{}).then(async()=>{try{
+  if(archiveDB)await archiveWrite(snapshot);else localStorage.setItem(COMPACT_KEY,JSON.stringify(snapshot));
+  clearPendingSave(encoded);
+  document.getElementById('notice').textContent='Salvato sul dispositivo · '+new Date().toLocaleTimeString('it-IT');
+ }catch(e){document.getElementById('notice').textContent=immediate?'Modifiche conservate nella copia di recupero':'ATTENZIONE: salvataggio non riuscito';if(!immediate)alert('Salvataggio non riuscito: '+e.message+'. Esporta un backup JSON.')}});
+ return saveQueue;
+};
+window.addEventListener('load',async()=>{
+ const pending=pendingSave();
+ try{
+  archiveDB=await openArchive();const saved=await archiveRead();
+  if(pending){db=pending.data;await archiveWrite(compactData());clearPendingSave(pending.raw)}
+  else if(saved){db=reconstruct(saved)}else{await archiveWrite(compactData())}
+  document.getElementById('notice').textContent='Archivio locale pronto · IndexedDB';
+ }catch(e){archiveDB=null;if(pending)db=pending.data;document.getElementById('notice').textContent='Archivio di riserva · verifica il salvataggio'}
+ finally{archiveReady=true;render()}
+});const nice=d=>d?d.split('-').reverse().join('/'):'';const today=()=>new Date().toISOString().slice(0,10);const client=id=>db.clients.find(x=>x.id===id);const hist=id=>db.visits.filter(x=>x.clientId===id).sort((a,b)=>b.date.localeCompare(a.date));const last=id=>hist(id)[0]?.date||'';const lastOrder=id=>hist(id).find(v=>v.order===1)?.date||'';const days=d=>d?Math.floor((new Date(today())-new Date(d))/86400000):null;
 const tabs=[['home','Panoramica'],['clients','Clienti'],['visits','Visite'],['compare','Confronti'],['invoices','Scadenzari'],['backup','Backup'],['cloud','Impostazioni']];function go(t){tab=t;selected=null;render()}function render(){ $('#nav').innerHTML=tabs.map(([k,n])=>`<button class="${tab===k?'active':''}" onclick="go('${k}')">${n}</button>`).join('');({home:home,clients:clientsView,visits:visitsView,compare:compareView,invoices:invoiceView,backup:backupView,cloud:cloudView}[tab])()}
 function home(){let now=db.visits.filter(v=>v.date.startsWith('2026'));$('#screen').innerHTML=`<div class="grid"><div class="stat">Clienti<b>${db.clients.length}</b></div><div class="stat">Visite 2026<b>${now.length}</b></div><div class="stat">Ordini 2026<b>${now.filter(v=>v.order===1).length}</b></div><div class="stat">Fatture registrate<b>${db.invoices.length}</b></div></div><div class="panel"><h2>Azioni rapide</h2><div class="toolbar"><button onclick="go('clients')">Cerca cliente</button><button onclick="go('visits')">Registra visita</button><button onclick="go('compare')">Confronta gli anni</button></div></div><div class="panel"><h2>Zone</h2>${[...new Set(db.clients.map(c=>c.zone))].map(z=>`<div class="item" onclick="zone=${JSON.stringify(z).replaceAll('"','&quot;')};go('clients')"><b>${esc(z)}</b> · ${db.clients.filter(c=>c.zone===z).length} clienti</div>`).join('')}</div><div class="panel"><b>Attenzione all'importazione</b><p>Le visite storiche sono state ricostruite dalle celle 0/1 associate alle date riconosciute. Alcune tabelle originali hanno intestazioni non uniformi: controlla i dati prima di considerarli definitivi.</p></div>`}
 function clientsView(){if(selected){detail();return}let list=db.clients.filter(c=>!c.deleted&&!c.archived&&(zone==='Tutte'||c.zone===zone)&&c.name.toLocaleLowerCase('it').includes(filter.toLocaleLowerCase('it')));$('#screen').innerHTML=`<h2>Ricerca clienti</h2><button class="secondary" onclick="archivedClients()">Clienti archiviati</button><input id="q" placeholder="Digita il nome del cliente" value="${esc(filter)}" oninput="filter=this.value;clientsView();document.getElementById('q').focus()"><label>Zona</label><select onchange="zone=this.value;clientsView()"><option>Tutte</option>${[...new Set(db.clients.map(c=>c.zone))].map(z=>`<option ${zone===z?'selected':''}>${esc(z)}</option>`).join('')}</select><div class="panel"><div class="flex"><b class="grow">${list.length} clienti</b><button onclick="addClient()">+ Cliente</button></div>${list.slice(0,150).map(c=>`<div class="item" onclick="selected='${c.id}';clientsView()"><b>${esc(c.name)}</b><div class="muted">${esc(c.zone)} · ultima visita ${nice(last(c.id))||'non registrata'}</div></div>`).join('')}${list.length>150?'<p class="muted">Affina la ricerca per visualizzare gli altri clienti.</p>':''}</div>`}
@@ -314,6 +338,7 @@ async function cloudPersist(data){
  /* Un archivio completo preserva anche rimozioni e archivi più piccoli dello storico iniziale. */
  const snapshot={format:3,data};
  if(archiveDB)await archiveWrite(snapshot);else localStorage.setItem(COMPACT_KEY,JSON.stringify(snapshot));
+ try{localStorage.removeItem(PENDING_SAVE_KEY)}catch(e){}
  db=data;document.getElementById('notice').textContent='Archivio aggiornato e salvato sul dispositivo';
 }
 async function cloudAction(action){
