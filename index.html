@@ -493,4 +493,59 @@ function addClientZoneOption(){
  if(existing)field.value=existing.value;
  else{const option=document.createElement('option');option.value=value;option.textContent=value;field.appendChild(option);field.value=value}
 }
+</script><script>(function(){
+const filters={from:'',to:'',order:'all',mandante:'',zone:''};let page=0;const pageSize=100;
+const ordered=v=>Number(v.order)===1;
+const mandanti=v=>Array.isArray(v.orderMandanteIds)?[...new Set(v.orderMandanteIds)]:[];
+const companyName=id=>(db.mandanti||[]).find(m=>m.id===id)?.name||'Mandante non disponibile';
+const names=v=>!ordered(v)?'—':mandanti(v).length?mandanti(v).map(companyName).join(', '):'Mandante non specificata';
+const invalid=()=>filters.from&&filters.to&&filters.from>filters.to;
+function rows(){
+ if(invalid())return [];
+ return db.visits.map((v,index)=>({v,index})).filter(({v})=>
+  (!filters.from||v.date>=filters.from)&&(!filters.to||v.date<=filters.to)&&
+  (filters.order==='all'||ordered(v)===(filters.order==='yes'))&&
+  (!filters.zone||(client(v.clientId)?.zone||'').trim()===filters.zone)&&
+  (!filters.mandante||(ordered(v)&&(filters.mandante==='__unknown'?mandanti(v).length===0:mandanti(v).includes(filters.mandante))))
+ ).sort((a,b)=>String(b.v.date||'').localeCompare(String(a.v.date||''))||b.index-a.index).map(x=>x.v);
+}
+function totals(items){return `${items.length} visite · ${items.filter(ordered).length} visite con ordine · ${new Set(items.map(v=>v.clientId)).size} clienti`}
+function mandateTotals(items){
+ const counts=new Map();for(const v of items.filter(ordered)){
+  const ids=mandanti(v);for(const id of ids.length?ids:['__unknown'])counts.set(id,(counts.get(id)||0)+1);
+ }
+ return [...counts].map(([id,n])=>`${id==='__unknown'?'Mandante non specificata':companyName(id)}: ${n}`).join(' · ')||'Nessun ordine nel periodo';
+}
+function table(items,editing){
+ let previous=null;
+ return `<table><thead><tr><th>Data</th><th>Cliente</th><th>Zona</th><th>Contatto</th><th>Ordine</th><th>Mandanti ordine</th><th>Note</th>${editing?'<th>Azioni</th>':''}</tr></thead><tbody>${items.map(v=>{
+  let day='';if(v.date!==previous){previous=v.date;day=`<tr class="visitDay"><th colspan="${editing?8:7}">${esc(nice(v.date))}</th></tr>`}
+  return day+`<tr data-visit-row="${esc(v.id)}"><td>${esc(nice(v.date))}</td><td>${esc(client(v.clientId)?.name||'Cliente non trovato')}</td><td>${esc(client(v.clientId)?.zone||'Da assegnare')}</td><td>${esc(v.contactType||'Visita')}</td><td>${ordered(v)?'Sì':'No'}</td><td>${esc(names(v))}</td><td style="white-space:pre-wrap">${esc(v.notes||'')}</td>${editing?`<td><button class="danger" data-delete-report-visit="${esc(v.id)}">Elimina</button></td>`:''}</tr>`;
+ }).join('')||`<tr><td colspan="${editing?8:7}">Nessuna visita corrisponde ai filtri.</td></tr>`}</tbody></table>`;
+}
+window.setVisitReportFilter=function(key,value){if(!(key in filters))return;filters[key]=value;page=0;visitsView()};
+window.resetVisitReportFilters=function(){Object.assign(filters,{from:'',to:'',order:'all',mandante:'',zone:''});page=0;visitsView()};
+window.visitReportPage=function(delta){page=Math.max(0,page+delta);visitsView()};
+window.visitsView=function(){
+ const items=rows(),pages=Math.max(1,Math.ceil(items.length/pageSize));page=Math.min(page,pages-1);
+ const zones=[...new Set(db.clients.map(c=>(c.zone||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'it'));
+ $('#screen').innerHTML=`<h2>Registro visite e ordini</h2><p>Visite dalla più recente alla più vecchia, raggruppate per giornata. Nello stesso giorno compare prima l’ultima registrata.</p><button onclick="go('clients')">Cerca cliente / Registra visita</button><div class="panel"><h3>Filtra il riepilogo</h3><div class="two"><div><label for="visitReportFrom">Dal giorno</label><input id="visitReportFrom" type="date" value="${esc(filters.from)}" onchange="setVisitReportFilter('from',this.value)"></div><div><label for="visitReportTo">Al giorno</label><input id="visitReportTo" type="date" value="${esc(filters.to)}" onchange="setVisitReportFilter('to',this.value)"></div><div><label for="visitReportOrder">Ordini</label><select id="visitReportOrder" onchange="setVisitReportFilter('order',this.value)"><option value="all" ${filters.order==='all'?'selected':''}>Tutte le visite</option><option value="yes" ${filters.order==='yes'?'selected':''}>Solo visite con ordine</option><option value="no" ${filters.order==='no'?'selected':''}>Solo visite senza ordine</option></select></div><div><label for="visitReportMandante">Mandante dell’ordine</label><select id="visitReportMandante" onchange="setVisitReportFilter('mandante',this.value)"><option value="">Tutte le mandanti</option>${(db.mandanti||[]).map(m=>`<option value="${esc(m.id)}" ${filters.mandante===m.id?'selected':''}>${esc(m.name)}</option>`).join('')}<option value="__unknown" ${filters.mandante==='__unknown'?'selected':''}>Mandante non specificata</option></select></div><div><label for="visitReportZone">Zona cliente</label><select id="visitReportZone" onchange="setVisitReportFilter('zone',this.value)"><option value="">Tutte le zone</option>${zones.map(z=>`<option value="${esc(z)}" ${filters.zone===z?'selected':''}>${esc(z)}</option>`).join('')}</select></div></div><p class="muted">Le date iniziale e finale sono comprese nel report. La mandante filtra le sole visite con ordine.</p>${invalid()?'<p role="alert">La data iniziale deve precedere o coincidere con quella finale.</p>':''}<div class="toolbar"><button onclick="openVisitReport()" ${invalid()||!items.length?'disabled':''}>Crea report / PDF</button><button class="secondary" onclick="resetVisitReportFilters()">Azzera filtri</button></div></div><div class="panel"><h3>Riepilogo del periodo</h3><p><b>${totals(items)}</b></p><p>${esc(mandateTotals(items))}</p><p class="muted">Una visita con più mandanti conta una volta nelle visite con ordine e una volta per ciascuna mandante associata.</p><div class="tablewrap">${table(items.slice(page*pageSize,(page+1)*pageSize),true)}</div><div class="toolbar"><button class="secondary" onclick="visitReportPage(-1)" ${page===0?'disabled':''}>← Precedenti</button><span>Pagina ${page+1} di ${pages} · ${items.length} visite</span><button class="secondary" onclick="visitReportPage(1)" ${page+1===pages?'disabled':''}>Successive →</button></div><p class="muted">Il report comprende tutte le visite filtrate, anche quelle nelle altre pagine.</p></div>`;
+ document.querySelectorAll('[data-delete-report-visit]').forEach(b=>b.onclick=()=>deleteLaurentVisit(b.dataset.deleteReportVisit));
+};
+let priorFocus;
+window.closeVisitReport=function(){document.getElementById('visitReportOverlay')?.remove();document.getElementById('visitReportPrintStyle')?.remove();document.body.style.overflow='';priorFocus?.focus?.()};
+window.openVisitReport=function(){
+ const items=rows();if(invalid())return alert('Seleziona un intervallo di date valido.');if(!items.length)return alert('Nessuna visita da includere nel report.');
+ priorFocus=document.activeElement;document.getElementById('visitReportOverlay')?.remove();
+ const descriptions=[filters.from?'Dal '+nice(filters.from):'Dall’inizio',filters.to?'al '+nice(filters.to):'fino all’ultima data disponibile',filters.order==='yes'?'Solo visite con ordine':filters.order==='no'?'Solo visite senza ordine':'Tutte le visite',filters.mandante?'Mandante: '+(filters.mandante==='__unknown'?'non specificata':companyName(filters.mandante)):'Tutte le mandanti',filters.zone?'Zona: '+filters.zone:'Tutte le zone'];
+ const overlay=document.createElement('section');overlay.id='visitReportOverlay';overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.setAttribute('aria-label','Report visite e ordini');overlay.style='position:fixed;inset:0;z-index:9999;background:#f1f5f3;overflow:auto;padding:18px';
+ const logo=document.querySelector('header img')?.src||'';
+ overlay.innerHTML=`<div class="visitReportSheet" style="background:white;max-width:1200px;margin:auto;padding:22px"><div class="toolbar visitReportActions"><button id="printVisitReport">Stampa / Salva PDF</button><button class="secondary" onclick="closeVisitReport()">Torna al riepilogo</button></div>${logo?`<img alt="Rappresentanze Laurent" src="${esc(logo)}" style="width:230px;max-height:100px;object-fit:contain">`:''}<h1>Report visite e ordini</h1><p>${esc(descriptions.join(' · '))}</p><p><b>${totals(items)}</b></p><p>Ordini per mandante: ${esc(mandateTotals(items))}</p><p class="muted">Visite in ordine decrescente di data. Una visita può comprendere ordini per più mandanti.</p><div class="tablewrap">${table(items,false)}</div><p>Rappresentanze Laurent · Report generato il ${esc(new Date().toLocaleDateString('it-IT'))}</p></div>`;
+ document.body.appendChild(overlay);document.body.style.overflow='hidden';
+ let style=document.getElementById('visitReportPrintStyle');if(!style){style=document.createElement('style');style.id='visitReportPrintStyle';document.head.appendChild(style)}
+ style.textContent=`.visitDay th{background:#e7f1eb;color:#173d2c;text-align:left}.visitReportSheet table{width:100%;border-collapse:collapse}.visitReportSheet th,.visitReportSheet td{padding:7px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}@media print{@page{size:A4 landscape;margin:12mm}body>*:not(#visitReportOverlay){display:none!important}body{overflow:visible!important}#visitReportOverlay{position:static!important;overflow:visible!important;background:white!important;padding:0!important}.visitReportSheet{max-width:none!important;padding:0!important}.visitReportActions{display:none!important}.visitReportSheet .tablewrap{overflow:visible!important}.visitReportSheet table{font-size:10px}.visitReportSheet thead{display:table-header-group}.visitReportSheet tr{break-inside:avoid}.visitDay{break-after:avoid}}`;
+ document.getElementById('printVisitReport').onclick=()=>window.print();document.getElementById('printVisitReport').focus();
+};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('visitReportOverlay'))closeVisitReport()});
+})();
 </script></body></html>
