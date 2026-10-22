@@ -451,7 +451,7 @@ window.mandanteDetail=function(id,editId=''){
 /* Laurent CRM - Promemoria locali. Email e push remoti richiedono backend dedicato. */
 (function(){
 const get=()=>Array.isArray(db.reminders)?db.reminders:(db.reminders=[]);
-const safe=window.esc;
+const safe=esc;
 const fmt=x=>x?new Date(x).toLocaleString('it-IT',{dateStyle:'short',timeStyle:'short'}):'';
 const label=r=>(r.kind==='client'?db.clients:db.mandanti||[]).find(x=>x.id===r.targetId)?.name||'Scheda non disponibile';
 const target=(kind,id)=>{if(kind==='client'){go('clients');selected=id;detail()}else{go('mandanti');mandanteDetail(id)}};
