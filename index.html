@@ -5,6 +5,7 @@ const seed=JSON.parse(document.getElementById('seed').textContent);
 const KEY='laurent-crm-v1', COMPACT_KEY='laurent-crm-compact-v2';
 function reconstruct(saved){
  if(!saved)return {clients:seed.clients,visits:seed.visits,invoices:[]};
+ if(saved.format===3)return saved.data;
  if(saved.format!==2)return saved;
  const clients=seed.clients.slice(),visits=seed.visits.slice();
  for(const [idx,value] of saved.clientChanges||[])clients[idx]=value;
@@ -14,6 +15,7 @@ function reconstruct(saved){
 }
 let db;try{db=reconstruct(JSON.parse(localStorage.getItem(COMPACT_KEY)||localStorage.getItem(KEY)||'null'))}catch(e){db=reconstruct(null)};
 function compactData(){
+ if(db.clients.length<seed.clients.length||db.visits.length<seed.visits.length)return {format:3,data:db};
  const clientChanges=[],visitChanges=[];
  for(let i=0;i<Math.min(seed.clients.length,db.clients.length);i++)if(JSON.stringify(seed.clients[i])!==JSON.stringify(db.clients[i]))clientChanges.push([i,db.clients[i]]);
  for(let i=0;i<Math.min(seed.visits.length,db.visits.length);i++)if(JSON.stringify(seed.visits[i])!==JSON.stringify(db.visits[i]))visitChanges.push([i,db.visits[i]]);
@@ -27,7 +29,7 @@ function archiveRead(){return new Promise((resolve,reject)=>{const t=archiveDB.t
 function archiveWrite(value){return new Promise((resolve,reject)=>{const t=archiveDB.transaction('records','readwrite');t.objectStore('records').put(value,'current');t.oncomplete=resolve;t.onerror=()=>reject(t.error);t.onabort=()=>reject(t.error)})}
 const save=()=>{const snapshot=compactData();if(!archiveReady){document.getElementById('notice').textContent='Preparazione archivio: salvataggio in coda'}saveQueue=saveQueue.catch(()=>{}).then(async()=>{try{if(archiveDB){await archiveWrite(snapshot)}else{localStorage.setItem(COMPACT_KEY,JSON.stringify(snapshot))}document.getElementById('notice').textContent='Salvato sul dispositivo · '+new Date().toLocaleTimeString('it-IT')}catch(e){document.getElementById('notice').textContent='ATTENZIONE: salvataggio non riuscito';alert('Salvataggio non riuscito: '+e.message+'. Esporta un backup JSON.')}})};
 window.addEventListener('load',async()=>{try{archiveDB=await openArchive();const saved=await archiveRead();if(saved){db=reconstruct(saved)}else{await archiveWrite(compactData())}document.getElementById('notice').textContent='Archivio locale pronto · IndexedDB'}catch(e){archiveDB=null;document.getElementById('notice').textContent='Archivio di riserva · verifica il salvataggio'}finally{archiveReady=true;render()}});const nice=d=>d?d.split('-').reverse().join('/'):'';const today=()=>new Date().toISOString().slice(0,10);const client=id=>db.clients.find(x=>x.id===id);const hist=id=>db.visits.filter(x=>x.clientId===id).sort((a,b)=>b.date.localeCompare(a.date));const last=id=>hist(id)[0]?.date||'';const lastOrder=id=>hist(id).find(v=>v.order===1)?.date||'';const days=d=>d?Math.floor((new Date(today())-new Date(d))/86400000):null;
-const tabs=[['home','Panoramica'],['clients','Clienti'],['visits','Visite'],['compare','Confronti'],['invoices','Scadenzari'],['backup','Backup']];function go(t){tab=t;selected=null;render()}function render(){ $('#nav').innerHTML=tabs.map(([k,n])=>`<button class="${tab===k?'active':''}" onclick="go('${k}')">${n}</button>`).join('');({home:home,clients:clientsView,visits:visitsView,compare:compareView,invoices:invoiceView,backup:backupView}[tab])()}
+const tabs=[['home','Panoramica'],['clients','Clienti'],['visits','Visite'],['compare','Confronti'],['invoices','Scadenzari'],['backup','Backup'],['cloud','Impostazioni']];function go(t){tab=t;selected=null;render()}function render(){ $('#nav').innerHTML=tabs.map(([k,n])=>`<button class="${tab===k?'active':''}" onclick="go('${k}')">${n}</button>`).join('');({home:home,clients:clientsView,visits:visitsView,compare:compareView,invoices:invoiceView,backup:backupView,cloud:cloudView}[tab])()}
 function home(){let now=db.visits.filter(v=>v.date.startsWith('2026'));$('#screen').innerHTML=`<div class="grid"><div class="stat">Clienti<b>${db.clients.length}</b></div><div class="stat">Visite 2026<b>${now.length}</b></div><div class="stat">Ordini 2026<b>${now.filter(v=>v.order===1).length}</b></div><div class="stat">Fatture registrate<b>${db.invoices.length}</b></div></div><div class="panel"><h2>Azioni rapide</h2><div class="toolbar"><button onclick="go('clients')">Cerca cliente</button><button onclick="go('visits')">Registra visita</button><button onclick="go('compare')">Confronta gli anni</button></div></div><div class="panel"><h2>Zone</h2>${[...new Set(db.clients.map(c=>c.zone))].map(z=>`<div class="item" onclick="zone=${JSON.stringify(z).replaceAll('"','&quot;')};go('clients')"><b>${esc(z)}</b> · ${db.clients.filter(c=>c.zone===z).length} clienti</div>`).join('')}</div><div class="panel"><b>Attenzione all'importazione</b><p>Le visite storiche sono state ricostruite dalle celle 0/1 associate alle date riconosciute. Alcune tabelle originali hanno intestazioni non uniformi: controlla i dati prima di considerarli definitivi.</p></div>`}
 function clientsView(){if(selected){detail();return}let list=db.clients.filter(c=>!c.deleted&&!c.archived&&(zone==='Tutte'||c.zone===zone)&&c.name.toLocaleLowerCase('it').includes(filter.toLocaleLowerCase('it')));$('#screen').innerHTML=`<h2>Ricerca clienti</h2><button class="secondary" onclick="archivedClients()">Clienti archiviati</button><input id="q" placeholder="Digita il nome del cliente" value="${esc(filter)}" oninput="filter=this.value;clientsView();document.getElementById('q').focus()"><label>Zona</label><select onchange="zone=this.value;clientsView()"><option>Tutte</option>${[...new Set(db.clients.map(c=>c.zone))].map(z=>`<option ${zone===z?'selected':''}>${esc(z)}</option>`).join('')}</select><div class="panel"><div class="flex"><b class="grow">${list.length} clienti</b><button onclick="addClient()">+ Cliente</button></div>${list.slice(0,150).map(c=>`<div class="item" onclick="selected='${c.id}';clientsView()"><b>${esc(c.name)}</b><div class="muted">${esc(c.zone)} · ultima visita ${nice(last(c.id))||'non registrata'}</div></div>`).join('')}${list.length>150?'<p class="muted">Affina la ricerca per visualizzare gli altri clienti.</p>':''}</div>`}
 function addClient(){let name=prompt('Nome nuovo cliente');if(!name?.trim())return;let z=prompt('Zona',zone==='Tutte'?'Aosta Media Valle':zone)||'Da assegnare';let id='c'+Date.now();db.clients.push({id,name:name.trim(),zone:z,company:'Da verificare',phone:'',address:'',city:'',email:'',notes:'',nextVisit:''});save();selected=id;clientsView()}
@@ -53,7 +55,7 @@ function compareView(){
 function invoiceView(){let rows=db.invoices;$('#screen').innerHTML=`<h2>Scadenzari</h2><div class="panel"><h3>Aggiungi fattura</h3><label>Cliente</label><input id="ic" placeholder="Nome cliente"><label>Azienda</label><select id="ico"><option>Alpenzu</option><option>Alpiflora</option></select><div class="two"><div><label>Numero fattura</label><input id="inum"></div><div><label>Scadenza</label><input id="idue" type="date"></div></div><div class="two"><div><label>Importo €</label><input id="iamt" type="number" step="0.01"></div><div><label>Incassato €</label><input id="ipaid" type="number" step="0.01" value="0"></div></div><label>Note e solleciti</label><textarea id="inotes"></textarea><button onclick="addInvoice()">Registra fattura</button></div><div class="panel"><h3>Fatture (${rows.length})</h3><div class="tablewrap"><table><tr><th>Cliente</th><th>Azienda</th><th>Scadenza</th><th>Residuo</th><th></th></tr>${rows.slice().sort((a,b)=>a.due.localeCompare(b.due)).map(i=>`<tr><td>${esc(i.customer)}<div class="muted">${esc(i.number)}</div></td><td>${esc(i.company)}</td><td>${nice(i.due)}</td><td>€ ${(i.amount-i.paid).toFixed(2)}</td><td><button class="secondary" onclick="payment('${i.id}')">Incasso</button></td></tr>`).join('')}</table></div></div>`}
 function addInvoice(){let c=$('#ic').value.trim(),a=Number($('#iamt').value),p=Number($('#ipaid').value);if(!c||!$('#idue').value||!(a>0)||p<0||p>a)return alert('Controlla cliente, scadenza e importi');db.invoices.push({id:'i'+Date.now(),customer:c,company:$('#ico').value,number:$('#inum').value,due:$('#idue').value,amount:a,paid:p,notes:$('#inotes').value});save();invoiceView()}
 function payment(id){let i=db.invoices.find(x=>x.id===id),amount=Number(prompt('Importo del nuovo incasso (€)',(i.amount-i.paid).toFixed(2)));if(!amount||amount<0||amount>i.amount-i.paid)return;i.paid+=amount;save();invoiceView()}
-function backupView(){$('#screen').innerHTML=`<h2>Backup e dati</h2><div class="panel"><p>Esporta periodicamente un backup completo. I dati sono attualmente conservati soltanto in questo browser/dispositivo e possono andare persi cancellando i dati del sito.</p><div class="toolbar"><button onclick="exportData()">Scarica backup JSON</button><button class="secondary" onclick="$('#upload').click()">Ripristina backup</button><input class="hide" id="upload" type="file" accept=".json" onchange="importData(this)"></div></div><div class="panel"><h3>Stato del progetto</h3><p>✓ Archivio storico importato<br>✓ Ricerca nominativa e zone<br>✓ Nuove visite, ordini e note<br>✓ Scadenzario manuale<br>✓ Salvataggio locale e backup<br>○ Sincronizzazione cloud: da realizzare<br>○ Analisi AI: da collegare<br>○ Verifica completa dei dati storici: da completare</p></div>`}
+function backupView(){$('#screen').innerHTML=`<h2>Backup e dati</h2><div class="panel"><p>Esporta periodicamente un backup completo. I dati sono attualmente conservati soltanto in questo browser/dispositivo e possono andare persi cancellando i dati del sito.</p><div class="toolbar"><button onclick="exportData()">Scarica backup JSON</button><button class="secondary" onclick="$('#upload').click()">Ripristina backup</button><input class="hide" id="upload" type="file" accept=".json" onchange="importData(this)"></div></div><div class="panel"><h3>Stato del progetto</h3><p>✓ Archivio storico importato<br>✓ Ricerca nominativa e zone<br>✓ Nuove visite, ordini e note<br>✓ Scadenzario manuale<br>✓ Salvataggio locale e backup<br>✓ Sincronizzazione cloud manuale: scheda Impostazioni<br>○ Analisi AI: da collegare<br>○ Verifica completa dei dati storici: da completare</p></div>`}
 function exportData(){let blob=new Blob([JSON.stringify({...db,exportedAt:new Date().toISOString()},null,2)],{type:'application/json'});let a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='laurent-crm-backup-'+today()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function importData(el){let f=el.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{try{let x=JSON.parse(r.result);if(!Array.isArray(x.clients)||!Array.isArray(x.visits)||!Array.isArray(x.invoices))throw Error();if(confirm('Sostituire tutti i dati locali con questo backup?')){db=x;save();go('home')}}catch(e){alert('Backup non valido')}};r.readAsText(f)}
 /* Il rendering iniziale avviene dopo il caricamento dell'archivio. */
@@ -270,6 +272,85 @@ const oldReminder=window.sendReminder;window.sendReminder=function(channel){if(c
 const oldReceipt=window.receipt;window.receipt=function(id){let p=db.payments.find(x=>x.id===id);if(!p)return oldReceipt(id);popup('Ricevuta di incasso',`<h1>Ricevuta di incasso</h1><p><b>Data:</b> ${clean(nice(p.date))}</p><p><b>Cliente:</b> ${clean(p.customer)}</p><p><b>Mandante:</b> ${clean(p.company)}</p><p><b>Fattura:</b> ${clean(p.number)}</p><p><b>Importo incassato:</b> ${euro(p.amount)}</p><p><b>Modalità:</b> ${clean(p.method)}</p><p><b>Versato a:</b> ${clean(p.deliveredPerson||p.deliveredTo||'Non ancora versato')}</p><p><b>Data versamento:</b> ${clean(p.deliveredDate||'—')}</p>`)};
 const oldAdd=window.addVisit;window.addVisit=function(id){oldAdd(id)};
 })();
+</script><script>
+/* Sincronizzazione manuale Laurent CRM: nessuna sovrascrittura automatica. */
+const SYNC_SETTINGS_KEY='laurent-cloud-settings-v1';
+let cloudBusy=false;
+function cloudSettings(){try{return JSON.parse(localStorage.getItem(SYNC_SETTINGS_KEY)||'{}')}catch(e){return {}}}
+function cloudView(){
+ const c=cloudSettings();
+ $('#screen').innerHTML=`<h2>Impostazioni · Sincronizzazione cloud</h2><div class="panel"><p>Collega questo dispositivo all’API Laurent CRM. Inserisci l’indirizzo completo dell’endpoint usato nei test GET e PUT, compreso il percorso finale.</p><label for="cloudUrl">Indirizzo API completo</label><input id="cloudUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://nome-worker.workers.dev/percorso" value="${esc(c.url||'')}"><label for="cloudToken">Sync Token</label><input id="cloudToken" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(c.token||'')}"><p class="muted">Inserisci soltanto il token, senza la parola Bearer. Le impostazioni vengono conservate in questo browser: il token non viene incluso nei backup.</p><div class="toolbar"><button data-cloud onclick="cloudSave()">Salva impostazioni</button><button data-cloud class="secondary" onclick="cloudAction('test')">Verifica collegamento</button><button data-cloud class="secondary" onclick="cloudForget()">Dimentica token</button></div></div><div class="panel"><h3>Dati sul dispositivo</h3><p>${db.clients.length} clienti · ${db.visits.length} visite · ${db.invoices.length} fatture</p><p>La sincronizzazione è manuale. Invia sostituisce la copia sul cloud; recupera sostituisce i dati su questo dispositivo dopo conferma. Sono inclusi anche incassi e gli altri dati del CRM.</p><div class="toolbar"><button data-cloud onclick="cloudAction('push')">Invia dati al cloud</button><button data-cloud class="secondary" onclick="cloudAction('pull')">Recupera dati dal cloud</button><button data-cloud class="secondary" onclick="cloudRestoreBackup()">Ripristina copia prima del recupero</button></div><p id="cloudStatus" role="status" aria-live="polite">Nessuna operazione in corso.</p></div>`;
+ cloudSetBusy(cloudBusy);
+}
+function cloudSetBusy(value){cloudBusy=value;document.querySelectorAll('[data-cloud]').forEach(b=>b.disabled=value)}
+function cloudStatus(message){const el=document.getElementById('cloudStatus');if(el)el.textContent=message}
+function cloudSave(quiet=false){
+ const url=new URL(document.getElementById('cloudUrl').value.trim());
+ if(url.protocol!=='https:'||url.username||url.password||url.hash)throw Error('Inserisci un indirizzo HTTPS completo, senza password o frammenti.');
+ const token=document.getElementById('cloudToken').value.trim().replace(/^Bearer\s+/i,'');
+ if(!token)throw Error('Inserisci il Sync Token.');
+ const settings={url:url.href,token};localStorage.setItem(SYNC_SETTINGS_KEY,JSON.stringify(settings));
+ if(!quiet)cloudStatus('Impostazioni salvate su questo dispositivo.');return settings;
+}
+function cloudForget(){if(cloudBusy)return;localStorage.removeItem(SYNC_SETTINGS_KEY);document.getElementById('cloudToken').value='';cloudStatus('Token rimosso da questo dispositivo.')}
+function cloudValidate(data){if(!data||typeof data!=='object'||!['clients','visits','invoices'].every(k=>Array.isArray(data[k])&&data[k].every(v=>v&&typeof v==='object'&&!Array.isArray(v))))throw Error('Il cloud non contiene un archivio CRM valido.');return data}
+function cloudCounts(data){return `${data.clients.length} clienti, ${data.visits.length} visite, ${data.invoices.length} fatture`}
+async function cloudRequest(settings,method,data){
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+ try{
+  const response=await fetch(settings.url,{method,headers:{Authorization:'Bearer '+settings.token,...(method==='PUT'?{'Content-Type':'application/json'}:{})},...(method==='PUT'?{body:JSON.stringify(data)}:{}),signal:controller.signal,cache:'no-store',redirect:'error'});
+  if(!response.ok)throw Error(response.status===401||response.status===403?'Token non accettato: controlla il Sync Token.':'Risposta API HTTP '+response.status+'. Controlla indirizzo e configurazione del Worker.');
+  if(method==='PUT')return;
+  let result;try{result=await response.json()}catch(e){throw Error('L’indirizzo non restituisce JSON: controlla il percorso dell’endpoint.')}
+  if(result.error)throw Error('L’API ha restituito un errore. Verifica il percorso e la configurazione.');return result;
+ }catch(e){if(e.name==='AbortError')throw Error('Tempo scaduto: riprova il collegamento.');if(e instanceof TypeError)throw Error('Collegamento non riuscito: controlla connessione, indirizzo API e autorizzazioni CORS del Worker.');throw e}finally{clearTimeout(timer)}
+}
+async function cloudStoreBackup(){
+ const snapshot=JSON.parse(JSON.stringify(db));
+ if(archiveDB)await new Promise((resolve,reject)=>{const t=archiveDB.transaction('records','readwrite');t.objectStore('records').put(snapshot,'before-cloud-restore');t.oncomplete=resolve;t.onerror=()=>reject(t.error);t.onabort=()=>reject(t.error)});
+ else localStorage.setItem('laurent-before-cloud-restore',JSON.stringify(snapshot));
+}
+async function cloudPersist(data){
+ /* Un archivio completo preserva anche rimozioni e archivi più piccoli dello storico iniziale. */
+ const snapshot={format:3,data};
+ if(archiveDB)await archiveWrite(snapshot);else localStorage.setItem(COMPACT_KEY,JSON.stringify(snapshot));
+ db=data;document.getElementById('notice').textContent='Archivio aggiornato e salvato sul dispositivo';
+}
+async function cloudAction(action){
+ if(cloudBusy)return;cloudSetBusy(true);
+ try{
+  if(!archiveReady)throw Error('Attendi il caricamento dell’archivio locale.');
+  const settings=cloudSave(true);await saveQueue;cloudStatus('Collegamento in corso…');
+  if(action==='push'){
+   const snapshot=JSON.parse(JSON.stringify(db));cloudValidate(snapshot);
+   if(!confirm('Inviare '+cloudCounts(snapshot)+'? La copia già presente sul cloud verrà sostituita.')){cloudStatus('Invio annullato.');return}
+   await cloudRequest(settings,'PUT',snapshot);cloudStatus('Dati inviati al cloud: '+cloudCounts(snapshot)+'.');
+  }else{
+   const result=await cloudRequest(settings,'GET');
+   if(result.exists===false){cloudStatus('Collegamento riuscito. Nessun archivio presente sul cloud: puoi inviare i dati di questo dispositivo.');return}
+   const data=cloudValidate(result.data??result);
+   if(action==='test'){cloudStatus('Collegamento riuscito. Sul cloud: '+cloudCounts(data)+'. Nessun dato locale modificato.');return}
+   if(!confirm('Recuperare '+cloudCounts(data)+' dal cloud e sostituire '+cloudCounts(db)+' su questo dispositivo? Sarà conservata una copia locale prima della sostituzione.')){cloudStatus('Recupero annullato.');return}
+   await cloudStoreBackup();await cloudPersist(data);cloudView();cloudStatus('Dati recuperati e salvati: '+cloudCounts(data)+'. Copia precedente disponibile per il ripristino.');
+  }
+ }catch(e){cloudStatus('Operazione non completata: '+e.message)}finally{cloudSetBusy(false)}
+}
+async function cloudRestoreBackup(){
+ if(cloudBusy)return;cloudSetBusy(true);
+ try{
+  if(!archiveReady)throw Error('Attendi il caricamento dell’archivio.');await saveQueue;
+  let data;
+  if(archiveDB)data=await new Promise((resolve,reject)=>{const r=archiveDB.transaction('records','readonly').objectStore('records').get('before-cloud-restore');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
+  else data=JSON.parse(localStorage.getItem('laurent-before-cloud-restore')||'null');
+  if(!data)throw Error('Non è ancora disponibile una copia precedente al recupero.');cloudValidate(data);
+  if(!confirm('Ripristinare la copia precedente: '+cloudCounts(data)+'? I dati attuali del dispositivo saranno sostituiti.'))return;
+  await cloudPersist(data);cloudView();cloudStatus('Copia precedente ripristinata.');
+ }catch(e){cloudStatus('Ripristino non completato: '+e.message)}finally{cloudSetBusy(false)}
+}
+/* Mostra anche gli errori del salvataggio impostazioni senza interrompere l’interfaccia. */
+const cloudSaveSettings=cloudSave;
+cloudSave=function(quiet=false){try{return cloudSaveSettings(quiet)}catch(e){if(quiet)throw e;cloudStatus('Impostazioni non salvate: '+e.message)}};
+
 </script><script>
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => {
