@@ -512,7 +512,30 @@ window.remindersView=function(){const now=new Date(),items=[...get()].sort((a,b)
 const originalRender=window.render;window.render=function(){if(tab==='reminders'){$('#nav').innerHTML=[...tabs,['reminders','🔔 Promemoria']].map(([k,n])=>`<button class="${tab===k?'active':''}" onclick="go('${k}')">${n}</button>`).join('');remindersView();return}originalRender();if(!$('#nav button[onclick="go(\'reminders\')"]')){const b=document.createElement('button');b.textContent='🔔 Promemoria';b.onclick=()=>go('reminders');$('#nav').appendChild(b)}};
 const originalDetail=window.detail;window.detail=function(){originalDetail();if(!client(selected))return;const panel=document.createElement('div');panel.className='panel';panel.innerHTML=`<h3>Promemoria cliente</h3><button id="newClientReminder">+ Nuovo promemoria</button><p class="muted">${get().filter(r=>r.kind==='client'&&r.targetId===selected&&!r.done).length} promemoria aperti</p>`;$('#screen').appendChild(panel);panel.querySelector('button').onclick=()=>reminderForm('client',selected)};
 const originalMandante=window.mandanteDetail;window.mandanteDetail=function(id,...args){originalMandante(id,...args);const panel=document.createElement('div');panel.className='panel';panel.innerHTML=`<h3>Promemoria mandante</h3><button>+ Nuovo promemoria</button><p class="muted">${get().filter(r=>r.kind==='mandante'&&r.targetId===id&&!r.done).length} promemoria aperti</p>`;$('#screen').appendChild(panel);panel.querySelector('button').onclick=()=>reminderForm('mandante',id)};
-const originalHome=window.home;window.home=function(){originalHome();const p=document.createElement('div');p.className='panel';const upcoming=get().filter(r=>!r.done).sort((a,b)=>a.at.localeCompare(b.at)).slice(0,5);p.innerHTML=`<h2>🔔 Promemoria</h2><button onclick="go('reminders')">Vedi tutti</button>${upcoming.map(r=>`<div class="item"><strong>${safe(fmt(r.at))}</strong> · ${safe(label(r))}<p>${safe(r.text)}</p></div>`).join('')||'<p class="muted">Nessun promemoria da completare.</p>'}`;$('#screen').appendChild(p)};
+const originalHome=window.home;
+window.home=function(){
+ originalHome();
+ const p=document.createElement('section');p.className='panel';p.id='homeReminders';p.setAttribute('aria-labelledby','homeRemindersTitle');
+ const now=new Date(),day=new Date(now.getFullYear(),now.getMonth(),now.getDate()+1);
+ const items=get().filter(r=>!r.done).sort((a,b)=>a.at.localeCompare(b.at));
+ const overdue=items.filter(r=>new Date(r.at)<now).length;
+ const dueToday=items.filter(r=>new Date(r.at)>=now&&new Date(r.at)<day).length;
+ p.innerHTML=`<h2 id="homeRemindersTitle">🔔 Promemoria</h2><p><b>${items.length} da completare</b> · ${overdue} scaduti · ${dueToday} in programma oggi</p><div class="toolbar"><button type="button" data-new-home-reminder>+ Nuovo promemoria</button><button type="button" class="secondary" data-all-home-reminders>Vedi tutti</button></div>`;
+ for(const r of items.slice(0,5)){
+  const at=new Date(r.at),late=at<now,isToday=!late&&at<day;
+  const row=document.createElement('div');row.className='item';row.style.cursor='default';
+  row.innerHTML=`<p><span class="pill" style="background:${late?'#ffe6e3':isToday?'#fff1d0':'#e8f3ec'};color:${late?'#9b1c16':isToday?'#8c5900':'#23533b'}">${late?'Scaduto':isToday?'Oggi':'Programmato'}</span> <strong>${safe(fmt(r.at))}</strong></p><p>${safe(r.text)}</p><p class="muted">${r.kind==='client'?'Cliente':'Mandante'}: ${safe(label(r))}</p><div class="toolbar"><button type="button" class="secondary" data-home-open>Apri scheda</button><button type="button" class="secondary" data-home-edit>Modifica</button><button type="button" data-home-complete>Completa</button></div>`;
+  row.querySelector('[data-home-open]').onclick=()=>openReminderTarget(r.id);
+  row.querySelector('[data-home-edit]').onclick=()=>reminderForm('','',r.id);
+  row.querySelector('[data-home-complete]').onclick=()=>{r.done=true;r.updatedAt=new Date().toISOString();save();home()};
+  p.appendChild(row);
+ }
+ if(!items.length)p.insertAdjacentHTML('beforeend','<p class="muted">Nessun promemoria da completare.</p>');
+ if(items.length>5)p.insertAdjacentHTML('beforeend',`<p class="muted">Mostrati i primi 5 di ${items.length} promemoria. Tocca Vedi tutti per l’elenco completo.</p>`);
+ p.querySelector('[data-new-home-reminder]').onclick=()=>reminderForm();
+ p.querySelector('[data-all-home-reminders]').onclick=()=>go('reminders');
+ $('#screen').prepend(p);
+};
 })();
 </script><script>
 function addClientZoneOption(){
