@@ -491,21 +491,32 @@ window.reminderDelete=function(id){if(!confirm('Eliminare il promemoria?'))retur
 window.reminderForm=function(kind='',id='',editId=''){
  const edit=get().find(x=>x.id===editId),selectedKind=edit?.kind||kind||'client',selectedId=edit?.targetId||id;
  const options=k=>(k==='client'?db.clients:db.mandanti||[]).map(x=>`<option value="${safe(x.id)}">${safe(x.name)}</option>`).join('');
- $('#screen').innerHTML=`<h2>${edit?'Modifica':'Nuovo'} promemoria</h2><form class="panel" id="remForm"><label>Tipo scheda</label><select id="remKind"><option value="client" ${selectedKind==='client'?'selected':''}>Cliente</option><option value="mandante" ${selectedKind==='mandante'?'selected':''}>Mandante</option></select><label>Cerca cliente o mandante</label><input id="remSearch" type="search" autocomplete="off" placeholder="Digita una o più parole del nome"><p class="muted" id="remCount"></p><label>Seleziona dalla lista</label><select id="remTarget" required size="5" style="height:auto;min-height:130px"></select><label>Descrizione</label><textarea id="remText" required rows="3">${safe(edit?.text||'')}</textarea><label>Data e ora dell'avviso</label><input id="remAt" type="datetime-local" required value="${safe(edit?.at||'')}"><label>Ripetizione</label><select id="remRepeat"><option value="none">Nessuna</option><option value="weekly" ${edit?.repeat==='weekly'?'selected':''}>Settimanale</option><option value="monthly" ${edit?.repeat==='monthly'?'selected':''}>Mensile</option><option value="yearly" ${edit?.repeat==='yearly'?'selected':''}>Annuale</option></select><p class="muted">Il promemoria viene salvato nel CRM. Email e push richiedono ancora la configurazione Cloudflare.</p><div class="toolbar"><button type="submit">Salva promemoria</button><button type="button" class="secondary" onclick="go('reminders')">Annulla</button></div></form>`;
- const kindEl=$('#remKind'),tgt=$('#remTarget'),search=$('#remSearch'),count=$('#remCount');
+ $('#screen').innerHTML=`<h2>${edit?'Modifica':'Nuovo'} promemoria</h2><form class="panel" id="remForm"><label>Tipo scheda</label><select id="remKind"><option value="client" ${selectedKind==='client'?'selected':''}>Cliente</option><option value="mandante" ${selectedKind==='mandante'?'selected':''}>Mandante</option></select><label>Cerca cliente o mandante</label><input id="remSearch" type="search" autocomplete="off" placeholder="Digita una o più parole del nome"><p class="muted" id="remCount"></p><label>Seleziona dalla lista</label><input id="remTarget" type="hidden"><div id="remResults" role="group" aria-label="Risultati ricerca" style="max-height:280px;overflow-y:auto;border:1px solid #cbdad1;border-radius:10px;padding:6px;background:#fff;-webkit-overflow-scrolling:touch"></div><p id="remSelection" aria-live="polite" class="muted"></p><label>Descrizione</label><textarea id="remText" required rows="3">${safe(edit?.text||'')}</textarea><label>Data e ora dell'avviso</label><input id="remAt" type="datetime-local" required value="${safe(edit?.at||'')}"><label>Ripetizione</label><select id="remRepeat"><option value="none">Nessuna</option><option value="weekly" ${edit?.repeat==='weekly'?'selected':''}>Settimanale</option><option value="monthly" ${edit?.repeat==='monthly'?'selected':''}>Mensile</option><option value="yearly" ${edit?.repeat==='yearly'?'selected':''}>Annuale</option></select><p class="muted">Il promemoria viene salvato nel CRM. Email e push richiedono ancora la configurazione Cloudflare.</p><div class="toolbar"><button type="submit">Salva promemoria</button><button type="button" class="secondary" onclick="go('reminders')">Annulla</button></div></form>`;
+ const kindEl=$('#remKind'),tgt=$('#remTarget'),search=$('#remSearch'),count=$('#remCount'),results=$('#remResults'),selection=$('#remSelection');
  let chosen=selectedId||'';
  const normalize=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
  const refresh=()=>{
-   const all=(kindEl.value==='client'?db.clients:db.mandanti||[]).slice().sort((a,b)=>a.name.localeCompare(b.name,'it'));
+   const all=(kindEl.value==='client'?db.clients:db.mandanti||[]).filter(x=>x&&x.name&&!x.deleted&&!x.archived).slice().sort((a,b)=>String(a.name).localeCompare(String(b.name),'it'));
    const words=normalize(search.value).trim().split(/\s+/).filter(Boolean);
    const matches=all.filter(x=>words.every(w=>normalize(x.name).includes(w)));
-   tgt.innerHTML=matches.map(x=>`<option value="${safe(x.id)}">${safe(x.name)}</option>`).join('');
-   if(matches.some(x=>x.id===chosen))tgt.value=chosen;
-   else if(matches.length===1){tgt.value=matches[0].id;chosen=matches[0].id}
-   else tgt.selectedIndex=-1;
-   count.textContent=matches.length+' risultati su '+all.length+(matches.length>1?' — tocca il nome desiderato':'');
+   if(!matches.some(x=>String(x.id)===String(chosen)))chosen='';
+   tgt.value=chosen;
+   results.replaceChildren();
+   const visible=matches.slice(0,100);
+   for(const x of visible){
+    const button=document.createElement('button');button.type='button';button.className='secondary';
+    const picked=String(x.id)===String(chosen);
+    button.textContent=(picked?'✓ ':'')+x.name+(kindEl.value==='client'&&x.zone?' · '+x.zone:'');
+    button.setAttribute('aria-pressed',String(picked));
+    button.style.cssText='display:block;width:100%;text-align:left;min-height:48px;margin:3px 0;white-space:normal;'+(picked?'background:#24674d;color:white':'');
+    button.onclick=()=>{chosen=String(x.id);refresh()};results.appendChild(button);
+   }
+   if(!matches.length){const empty=document.createElement('p');empty.className='muted';empty.textContent='Nessun risultato. Prova con un’altra parola del nome.';results.appendChild(empty)}
+   const selected=all.find(x=>String(x.id)===String(chosen));
+   selection.textContent=selected?'Selezionato: '+selected.name:'Tocca un nome nella lista per selezionarlo.';
+   count.textContent=matches.length+' risultati su '+all.length+(matches.length>100?' · Mostrati i primi 100: continua a digitare per restringere la ricerca.':'');
  };
- kindEl.onchange=()=>{chosen='';search.value='';refresh()};search.oninput=refresh;tgt.onchange=()=>{chosen=tgt.value};refresh();
+ kindEl.onchange=()=>{chosen='';search.value='';refresh()};search.oninput=refresh;refresh();
  $('#remForm').onsubmit=e=>{e.preventDefault();if(!tgt.value)return alert('Seleziona una scheda');const obj={id:edit?.id||'r'+Date.now().toString(36)+Math.random().toString(36).slice(2),kind:kindEl.value,targetId:tgt.value,text:$('#remText').value.trim(),at:$('#remAt').value,repeat:$('#remRepeat').value,done:false,createdAt:edit?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};if(!obj.text||!obj.at)return alert('Compila descrizione, data e ora');if(edit)Object.assign(edit,obj);else db.reminders.push(obj);save();go('reminders')};
 };
 window.remindersView=function(){const now=new Date(),items=[...get()].sort((a,b)=>(a.done-b.done)||a.at.localeCompare(b.at));$('#screen').innerHTML=`<h2>Promemoria</h2><div class="panel"><div class="toolbar"><button onclick="reminderForm()">+ Nuovo promemoria</button></div><p class="muted">${items.filter(x=>!x.done).length} da completare · ${items.filter(x=>!x.done&&new Date(x.at)<=now).length} scaduti o in scadenza</p><p class="muted">Gli avvisi via email e le notifiche push non sono ancora attivi: serve configurare il server.</p></div><div class="panel">${items.map(r=>`<div class="item"><span class="pill ${r.done?'one':new Date(r.at)<=now?'warn':'zero'}">${r.done?'Completato':new Date(r.at)<=now?'Scaduto':'Programmato'}</span> <strong>${safe(fmt(r.at))}</strong><p>${safe(r.text)}</p><p class="muted">${r.kind==='client'?'Cliente':'Mandante'}: ${safe(label(r))}${r.repeat!=='none'?' · Ricorrenza: '+safe({weekly:'settimanale',monthly:'mensile',yearly:'annuale'}[r.repeat]):''}</p><div class="toolbar"><button class="secondary" onclick="openReminderTarget('${safe(r.id)}')">Apri scheda</button><button class="secondary" onclick="reminderToggle('${safe(r.id)}')">${r.done?'Riapri':'Completa'}</button><button class="secondary" onclick="reminderForm('','','${safe(r.id)}')">Modifica</button><button class="danger" onclick="reminderDelete('${safe(r.id)}')">Elimina</button></div></div>`).join('')||'<p>Nessun promemoria inserito.</p>'}</div>`};
