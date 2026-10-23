@@ -577,4 +577,83 @@ window.openVisitReport=function(){
 };
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('visitReportOverlay'))closeVisitReport()});
 })();
-</script></body></html>
+</script>
+<script>
+/* Laurent CRM · layout scadenzario e archivio consultabile, senza modifiche ai dati */
+(function(){
+ const previous=window.invoiceView;
+ if(typeof previous!=='function')return;
+ const css=document.createElement('style');
+ css.textContent=`#lrArchive details{border:1px solid #d8e4dd;border-radius:10px;padding:12px;margin:10px 0;background:#fff}#lrArchive summary{cursor:pointer;font-weight:700;padding:6px}#lrArchive .lrSearch{max-width:520px;margin:12px 0}#lrArchive [hidden]{display:none!important}#lrOperations .panel{margin-bottom:12px}#lrOperations h3{margin-top:0}#lrOperations .lrTip{font-size:.92em;color:#55655e}#lrInvoiceList{scroll-margin-top:16px}#lrInvoiceList tr[hidden]{display:none!important}`;
+ document.head.appendChild(css);
+ const findPanel=(name)=>[...document.querySelectorAll('#screen .panel')].find(p=>p.querySelector('h3')?.textContent.trim()===name);
+ const asText=(v)=>String(v||'').toLocaleLowerCase('it-IT');
+ function archiveSearch(input,kind){
+   const root=document.querySelector('#lrArchive [data-lr-archive="'+kind+'"]');
+   if(!root)return;
+   const q=asText(input.value).trim();
+   root.querySelectorAll('table tr').forEach((tr,j)=>{if(j===0)return;tr.hidden=!!q&&!asText(tr.textContent).includes(q)});
+ }
+ window.lrArchiveSearch=archiveSearch;
+ function arrange(){
+   const screen=document.getElementById('screen');if(!screen)return;
+   const invoice=findPanel('Fatture ('+(db.invoices||[]).length+')');
+   const delivery=findPanel('Versamenti alle mandanti');
+   const bulk=findPanel('Incasso multiplo per mandante');
+   const history=findPanel('Storico incassi');
+   const reminder=findPanel('Storico solleciti');
+   if(!invoice||!delivery||!history)return;
+   const heading=screen.querySelector('h2');
+   const operations=document.createElement('section');operations.id='lrOperations';
+   operations.innerHTML='<h3>Gestione incassi e versamenti</h3><p class="lrTip">Registra gli incassi e i versamenti alle mandanti. Le operazioni già effettuate sono consultabili nell’archivio più sotto.</p>';
+   if(heading)heading.after(operations);else screen.prepend(operations);
+   if(bulk)operations.appendChild(bulk);
+   // I versamenti ancora da registrare restano visibili; quelli conclusi vanno nell’archivio.
+   const table=delivery.querySelector('table');
+   if(table){
+     [...table.querySelectorAll('tr')].slice(1).forEach((tr,j)=>{
+       const p=(db.payments||[]).slice().reverse()[j];
+       if(p&&p.deliveredDate)tr.remove();
+     });
+     if(table.querySelectorAll('tr').length===1){
+       const msg=document.createElement('p');msg.className='muted';msg.textContent='Nessun incasso da versare alle mandanti.';table.before(msg);
+     }
+   }
+   delivery.querySelector('h3').textContent='Versamenti da effettuare';
+   operations.appendChild(delivery);
+   invoice.id='lrInvoiceList';
+   const archive=document.createElement('section');archive.id='lrArchive';
+   archive.innerHTML='<h3>Archivio operazioni effettuate</h3><p class="muted">Gli incassi e i versamenti restano salvati. Apri una sezione e cerca per cliente, mandante, fattura, data o importo.</p>';
+   const receipts=document.createElement('details');receipts.dataset.lrArchive='receipts';
+   receipts.innerHTML='<summary>Incassi registrati ('+(db.payments||[]).length+')</summary><input class="lrSearch" type="search" placeholder="Cerca incasso, cliente, mandante, fattura..." aria-label="Cerca incassi" oninput="lrArchiveSearch(this,\'receipts\')">';
+   receipts.appendChild(history);archive.appendChild(receipts);
+   const delivered=(db.payments||[]).filter(p=>p.deliveredDate).slice().reverse();
+   const transfers=document.createElement('details');transfers.dataset.lrArchive='transfers';
+   transfers.innerHTML='<summary>Versamenti effettuati ('+delivered.length+')</summary><input class="lrSearch" type="search" placeholder="Cerca versamento, mandante, data, destinatario..." aria-label="Cerca versamenti" oninput="lrArchiveSearch(this,\'transfers\')">';
+   const p=document.createElement('div');p.className='panel';
+   const escHtml=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+   const money=x=>'€ '+Number(x||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2});
+   p.innerHTML='<div class="tablewrap"><table><thead><tr><th>Data</th><th>Mandante</th><th>Cliente / fattura</th><th>Importo</th><th>Consegnato a</th><th>Azioni</th></tr></thead><tbody>'+
+    delivered.map(x=>'<tr><td>'+escHtml(x.deliveredDate)+'</td><td>'+escHtml(x.company)+'</td><td>'+escHtml(x.customer)+' · '+escHtml(x.number)+'</td><td>'+money(x.amount)+'</td><td>'+escHtml(x.deliveredPerson||x.deliveredTo||'—')+'</td><td><button class="secondary" onclick="registerDelivery('+JSON.stringify(String(x.id)).replace(/"/g,'&quot;')+')">Modifica</button> <button class="danger" onclick="deleteLaurentDelivery('+JSON.stringify(String(x.id)).replace(/"/g,'&quot;')+')">Elimina versamento</button></td></tr>').join('')+'</tbody></table></div>';
+   if(!delivered.length)p.insertAdjacentHTML('beforeend','<p class="muted">Nessun versamento effettuato.</p>');
+   transfers.appendChild(p);archive.appendChild(transfers);
+   if(reminder){const r=document.createElement('details');r.innerHTML='<summary>Storico solleciti</summary>';r.appendChild(reminder);archive.appendChild(r)}
+   invoice.after(archive);
+   // Le fatture saldate non spariscono dai dati: sono ricercabili aprendo l'archivio fatture.
+   const settled=(db.invoices||[]).filter(i=>Number(i.amount||0)-Number(i.paid||0)<=0.001);
+   const invoiceArchive=document.createElement('details');invoiceArchive.dataset.lrArchive='invoices';
+   invoiceArchive.innerHTML='<summary>Fatture completamente incassate ('+settled.length+')</summary><input class="lrSearch" type="search" placeholder="Cerca fattura saldata..." aria-label="Cerca fatture saldate" oninput="lrArchiveSearch(this,\'invoices\')">';
+   const invoicePanel=document.createElement('div');invoicePanel.className='panel';
+   invoicePanel.innerHTML='<div class="tablewrap"><table><tr><th>Cliente</th><th>Mandante</th><th>Fattura</th><th>Scadenza</th><th>Importo</th></tr>'+settled.map(i=>'<tr><td>'+escHtml(i.customer)+'</td><td>'+escHtml(i.company)+'</td><td>'+escHtml(i.number)+'</td><td>'+escHtml(i.due)+'</td><td>'+money(i.amount)+'</td></tr>').join('')+'</table></div>';
+   invoiceArchive.appendChild(invoicePanel);archive.appendChild(invoiceArchive);
+   // Conserva il filtro originale, nascondendo solo le righe già saldate.
+   const originalFilter=window.filterInvoiceRows;
+   if(typeof originalFilter==='function'){
+     window.filterInvoiceRows=function(q){originalFilter(q);const rows=document.querySelectorAll('#invoiceRows tr');const matching=(db.invoices||[]).filter(i=>asText(i.customer+' '+i.number+' '+i.company).includes(asText(q))).slice().sort((a,b)=>(a.due||'').localeCompare(b.due||''));rows.forEach((tr,j)=>{const i=matching[j];tr.hidden=!!i&&Number(i.amount||0)-Number(i.paid||0)<=0.001})};
+     window.filterInvoiceRows(document.getElementById('invoiceSearch')?.value||'');
+   }
+ }
+ window.invoiceView=function(){previous();arrange()};
+})();
+</script>
+</body></html>
