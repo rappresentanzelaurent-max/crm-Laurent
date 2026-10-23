@@ -656,4 +656,50 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElement
  window.invoiceView=function(){previous();arrange()};
 })();
 </script>
+<script>
+/* Indicatori contabili per elenco clienti e scheda cliente.
+   Sola lettura: non altera incassi, fatture o backup. */
+(function(){
+const norm=v=>String(v??'').trim().toLocaleLowerCase('it-IT').replace(/\s+/g,' ');
+const euroLocal=n=>'€ '+Number(n||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2});
+function status(c){
+ const now=new Date();now.setHours(0,0,0,0);
+ const items=(db.invoices||[]).filter(i=>norm(i.customer)===norm(c.name));
+ const open=items.filter(i=>Number(i.amount||0)-Number(i.paid||0)>0.009);
+ const overdue=open.filter(i=>{const d=new Date(String(i.due||'')+'T00:00:00');return !isNaN(d)&&d<now;});
+ return {open,overdue,total:open.reduce((n,i)=>n+Math.max(0,Number(i.amount||0)-Number(i.paid||0)),0),late:overdue.reduce((n,i)=>n+Math.max(0,Number(i.amount||0)-Number(i.paid||0)),0)};
+}
+function badge(c){
+ const a=status(c);
+ if(a.overdue.length)return '<span style="display:inline-block;background:#ffe6e3;color:#9b1c16;border-radius:6px;padding:4px 7px;margin:4px 4px 2px 0;font-size:12px;font-weight:700">⚠ '+a.overdue.length+' scadute · '+euroLocal(a.late)+'</span>';
+ if(a.open.length)return '<span style="display:inline-block;background:#fff2d3;color:#775400;border-radius:6px;padding:4px 7px;margin:4px 4px 2px 0;font-size:12px;font-weight:700">'+a.open.length+' da incassare · '+euroLocal(a.total)+'</span>';
+ return '';
+}
+const oldList=window.clientsView;
+window.clientsView=function(){
+ oldList();
+ if(selected)return;
+ document.querySelectorAll('#screen [data-open-client]').forEach(el=>{
+   const c=(db.clients||[]).find(x=>String(x.id)===el.dataset.openClient);
+   if(c){const label=badge(c);if(label)el.insertAdjacentHTML('beforeend','<div>'+label+'</div>');}
+ });
+};
+const oldDetail=window.detail;
+window.detail=function(){
+ oldDetail();
+ const c=(db.clients||[]).find(x=>String(x.id)===String(selected));
+ if(!c)return;
+ const a=status(c);
+ const screen=document.getElementById('screen');
+ if(!screen||screen.querySelector('#lrInvoiceClientSummary'))return;
+ const box=document.createElement('div');box.className='panel';box.id='lrInvoiceClientSummary';
+ const escLocal=v=>String(v??'').replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k]));
+ box.innerHTML='<h3>Situazione fatture cliente</h3><div class="grid"><div class="stat">Da incassare<b>'+euroLocal(a.total)+'</b></div><div class="stat">Scaduto<b>'+euroLocal(a.late)+'</b></div><div class="stat">Fatture aperte<b>'+a.open.length+'</b></div></div>'+
+ (a.open.length?'<details><summary>Visualizza fatture aperte e scadute</summary><div class="tablewrap"><table><thead><tr><th>Mandante</th><th>Fattura</th><th>Scadenza</th><th>Residuo</th><th>Stato</th></tr></thead><tbody>'+
+ a.open.slice().sort((x,y)=>String(x.due||'').localeCompare(String(y.due||''))).map(i=>'<tr><td>'+escLocal(i.company)+'</td><td>'+escLocal(i.number)+'</td><td>'+escLocal(i.due)+'</td><td>'+euroLocal(Math.max(0,Number(i.amount||0)-Number(i.paid||0)))+'</td><td>'+((a.overdue.includes(i))?'Scaduta':'Da incassare')+'</td></tr>').join('')+
+ '</tbody></table></div></details>':'<p class="muted">Nessuna fattura da incassare.</p>');
+ const first=screen.querySelector('.panel');if(first)first.insertAdjacentElement('afterend',box);else screen.prepend(box);
+};
+})();
+</script>
 </body></html>
