@@ -762,4 +762,46 @@ window.visitsView=function(){
  });
 };
 })();
-</script></body></html>
+</script><script>
+/* Home touch: solo navigazione e presentazione, archivio invariato. */
+(function(){
+const style=document.createElement('style');style.textContent=`
+header{position:static;padding:12px 18px}header img{width:260px!important;max-width:75%!important;height:auto!important;max-height:92px!important;object-fit:contain}main{max-width:1100px}.lrHomeTop{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:4px 0 16px}.lrHomeTop h2{font-size:26px;margin:0}.lrHomeTop p{margin:4px 0;color:#697b73}.lrHomeSearch{padding:18px;background:white;border:1px solid #dce8df;border-radius:16px;margin-bottom:16px}.lrHomeSearch label{margin-top:0;font-size:16px}.lrHomeSearch input{font-size:18px;min-height:52px}.lrHomeResults button{display:block;width:100%;text-align:left;margin-top:7px;min-height:50px;white-space:normal}.lrHomeTiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.lrHomeTile{background:white;border:1px solid #dce8df;border-radius:17px;padding:18px;min-height:145px;box-shadow:0 2px 6px #102c1909;text-align:left;color:#17352d;width:100%;font:inherit;display:flex;flex-direction:column;align-items:flex-start;gap:8px}.lrHomeTile:hover,.lrHomeTile:focus-visible{border-color:#24674d;background:#f0f7f2}.lrHomeTile strong{font-size:19px}.lrHomeTile span{font-size:14px;color:#697b73;line-height:1.4}.lrHomeTile .lrIcon{font-size:28px;line-height:1}.lrHomeNumbers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.lrHomeNumbers button{text-align:left;min-height:85px;background:#e8f3ec;color:#23533b;font-size:14px}.lrHomeNumbers b{display:block;font-size:24px;margin-top:5px}.lrHomeNumbers .lrLate{background:#fff0ee;color:#9b1c16}.lrHomeFooter{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}.lrHomeFooter button,.lrHomeTiles+.toolbar button{min-height:48px}.lrOtherSummary>summary{cursor:pointer;font-weight:650;padding:8px}.lrMenu{margin-bottom:14px}.lrMenu summary{cursor:pointer;padding:12px;background:#e6eee8;border-radius:10px;color:#23533b;font-weight:650}.lrMenu .nav{display:flex;flex-wrap:wrap;overflow:visible;margin:8px 0}.lrMenu button{min-height:46px}.lrHomeReturn{margin-bottom:10px;min-height:48px}#homeReminders h2{font-size:20px}#homeReminders .item{padding:10px 0}#homeReminders .item p{margin:7px 0}@media(max-width:700px){.lrHomeTiles{grid-template-columns:repeat(2,minmax(0,1fr))}.lrHomeTile{padding:15px;min-height:155px}.lrHomeNumbers{gap:6px}.lrHomeNumbers button{padding:12px 8px;font-size:12px}.lrHomeNumbers b{font-size:19px}.lrHomeTop h2{font-size:23px}}@media(max-width:390px){.lrHomeTiles{grid-template-columns:1fr}.lrHomeNumbers{grid-template-columns:1fr}}`;
+document.head.appendChild(style);
+const original=window.home;
+const norm=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('it').trim();
+const activeClients=()=>db.clients.filter(c=>!c.deleted&&!c.archived);
+window.home=function(){
+ original();
+ const screen=document.getElementById('screen'),reminders=screen.querySelector('#homeReminders');
+ const legacy=Array.from(screen.children).filter(el=>el!==reminders);
+ screen.replaceChildren();
+ const now=new Date(),dayStart=new Date(now.getFullYear(),now.getMonth(),now.getDate()),dayEnd=new Date(now.getFullYear(),now.getMonth(),now.getDate()+1);
+ const open=(db.reminders||[]).filter(r=>r&&!r.done&&typeof r.at==='string'&&['client','mandante'].includes(r.kind));
+ const late=open.filter(r=>new Date(r.at)<dayStart).length,todayItems=open.filter(r=>new Date(r.at)>=dayStart&&new Date(r.at)<dayEnd).length;
+ const localDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),String(now.getDate()).padStart(2,'0')].join('-');
+ const overdue=(db.invoices||[]).filter(i=>String(i.due||'')<localDate&&/^\d{4}-\d{2}-\d{2}$/.test(i.due)&&Number(i.amount||0)-Number(i.paid||0)>0.009).reduce((n,i)=>n+Number(i.amount||0)-Number(i.paid||0),0);
+ const top=document.createElement('div');top.className='lrHomeTop';top.innerHTML=`<div><h2>Il tuo lavoro, a portata di mano</h2><p>${esc(now.toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'}))}</p></div>`;screen.appendChild(top);
+ const searchBox=document.createElement('section');searchBox.className='lrHomeSearch';searchBox.innerHTML='<label for="lrQuickClient">Cerca un cliente</label><input type="search" id="lrQuickClient" placeholder="Scrivi il nome per aprire la scheda…" autocomplete="off"><div id="lrQuickResults" class="lrHomeResults" aria-live="polite"></div>';screen.appendChild(searchBox);
+ const input=searchBox.querySelector('input'),results=searchBox.querySelector('#lrQuickResults');
+ input.oninput=()=>{results.replaceChildren();const words=norm(input.value).split(/\s+/).filter(Boolean);if(!words.length)return;const matches=activeClients().filter(c=>words.every(w=>norm(c.name).includes(w))).sort((a,b)=>String(a.name).localeCompare(String(b.name),'it'));for(const c of matches.slice(0,8)){const b=document.createElement('button');b.type='button';b.className='secondary';b.textContent=c.name+(c.zone?' · '+c.zone:'');b.onclick=()=>{go('clients');selected=c.id;detail()};results.appendChild(b)}if(!matches.length){const p=document.createElement('p');p.textContent='Nessun cliente trovato. Prova con un’altra parola.';results.appendChild(p)}if(matches.length>8){const b=document.createElement('button');b.type='button';b.textContent='Vedi tutti i '+matches.length+' risultati';b.onclick=()=>{filter=input.value;zone='Tutte';if(typeof setClientCompanyFilter==='function')setClientCompanyFilter('');go('clients')};results.appendChild(b)}};
+ const numbers=document.createElement('div');numbers.className='lrHomeNumbers';numbers.innerHTML=`<button type="button" data-to="reminders">Promemoria di oggi<b>${todayItems}</b></button><button type="button" data-to="reminders" ${late?'class="lrLate"':''}>Promemoria arretrati<b>${late}</b></button><button type="button" data-to="invoices" ${overdue?'class="lrLate"':''}>Fatture scadute<b>${esc(overdue.toLocaleString('it-IT',{style:'currency',currency:'EUR',maximumFractionDigits:2}))}</b></button>`;numbers.querySelectorAll('[data-to]').forEach(b=>b.onclick=()=>go(b.dataset.to));screen.appendChild(numbers);
+ const tiles=document.createElement('div');tiles.className='lrHomeTiles';
+ const links=[['👥','Clienti','Schede, zone e fatture del cliente','clients'],['📝','Visite e ordini','Registro, filtri e nuove visite','visits'],['💶','Scadenzario e incassi','Fatture, incassi, ricevute e solleciti','invoices'],['🏢','Mandanti','Schede, note e contatti','mandanti'],['🔔','Promemoria','Attività, scadenze e appuntamenti','reminders'],['📊','Report e confronti','Riepiloghi visite e andamento ordini','report']];
+ for(const [icon,title,description,to] of links){const b=document.createElement('button');b.type='button';b.className='lrHomeTile';b.dataset.homeSection=to;b.innerHTML=`<span class="lrIcon" aria-hidden="true">${icon}</span><strong>${title}</strong><span>${description}</span>`;b.onclick=()=>go(to);tiles.appendChild(b)}screen.appendChild(tiles);
+ const shortcuts=document.createElement('div');shortcuts.className='toolbar';shortcuts.innerHTML='<button type="button" data-quick-visit>+ Registra visita</button><button type="button" class="secondary" data-compare>Confronta gli anni</button><button type="button" class="secondary" data-transfers>Versamenti mandanti</button>';shortcuts.querySelector('[data-quick-visit]').onclick=()=>{go('clients');document.getElementById('q')?.focus()};shortcuts.querySelector('[data-compare]').onclick=()=>go('compare');shortcuts.querySelector('[data-transfers]').onclick=()=>{go('invoices');document.getElementById('lrOperations')?.scrollIntoView?.({block:'start'})};screen.appendChild(shortcuts);
+ if(reminders)screen.appendChild(reminders);
+ const more=document.createElement('details');more.className='panel lrOtherSummary';more.innerHTML='<summary>Statistiche e riepiloghi per zona e mandante</summary>';legacy.forEach(el=>more.appendChild(el));screen.appendChild(more);
+ const footer=document.createElement('div');footer.className='lrHomeFooter';footer.innerHTML='<button type="button" class="secondary" data-backup>Backup e dati</button><button type="button" class="secondary" data-settings>Impostazioni e sincronizzazione</button>';footer.querySelector('[data-backup]').onclick=()=>go('backup');footer.querySelector('[data-settings]').onclick=()=>go('cloud');screen.appendChild(footer);
+};
+const renderBefore=window.render;
+window.render=function(){
+ renderBefore();
+ const nav=document.getElementById('nav');let menu=document.getElementById('lrMainMenu');
+ if(!menu){menu=document.createElement('details');menu.id='lrMainMenu';menu.className='lrMenu';const summary=document.createElement('summary');summary.textContent='Tutte le funzioni';menu.appendChild(summary);nav.before(menu);menu.appendChild(nav)}
+ menu.open=false;
+ let back=document.getElementById('lrBackHome');if(!back){back=document.createElement('button');back.id='lrBackHome';back.className='secondary lrHomeReturn';back.textContent='⌂ Torna alla Home';back.onclick=()=>go('home');menu.before(back)}back.hidden=false;back.textContent=tab==='home'?'⌂ Home':'⌂ Torna alla Home';
+};
+})();
+</script>
+</body></html>
