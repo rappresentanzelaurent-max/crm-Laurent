@@ -804,4 +804,62 @@ window.render=function(){
 };
 })();
 </script>
+<script>
+/* Schede a sezioni: i moduli restano montati, preservando campi e gestori. */
+(function(){
+const css=document.createElement('style');css.textContent=`.lrSheetTitle{margin:18px 0 12px}.lrSheetTitle h2{font-size:25px;margin-bottom:5px}.lrSheetTitle p{margin:0;color:#697b73}.lrSheetLinks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0}.lrSheetLinks button{min-height:56px;white-space:normal;text-align:left}.lrSheetSection{border:1px solid #dce8df;border-radius:14px;background:white;margin:12px 0}.lrSheetSection>summary{padding:17px;cursor:pointer;font-weight:700;color:#23533b;font-size:17px}.lrSheetSection>.panel{border:0;box-shadow:none;margin:0;border-radius:0 0 14px 14px}.lrSheetSection[open]>summary{border-bottom:1px solid #e3eae5}.lrSheetReminders{border-top:4px solid #24674d}.lrSheetReminders .toolbar button{min-height:46px}.lrSheetReminders .item p{margin:6px 0}.lrSheetReminders .item{cursor:default}.lrSheetReminders h3{font-size:19px}.lrSheetReminders .lrReminderStatus{display:inline-block;padding:4px 8px;border-radius:7px;background:#e8f3ec;color:#23533b;font-size:12px;font-weight:700}.lrSheetReminders .lrReminderLate{background:#ffe6e3;color:#9b1c16}.lrSheetReminders .lrReminderToday{background:#fff1d0;color:#8c5900}@media(max-width:600px){.lrSheetLinks{grid-template-columns:repeat(2,minmax(0,1fr))}.lrSheetTitle h2{font-size:22px}}`;
+document.head.appendChild(css);
+const states=new Map();
+function remindersPanel(panel,kind,id,redraw){
+ panel.classList.add('lrSheetReminders');panel.id='lrSheetReminders';
+ const create=panel.querySelector('button');const title=panel.querySelector('h3');
+ panel.replaceChildren();if(title)panel.appendChild(title);
+ const items=(db.reminders||[]).filter(r=>r&&r.kind===kind&&String(r.targetId)===String(id)&&!r.done&&typeof r.at==='string').sort((a,b)=>a.at.localeCompare(b.at));
+ const count=document.createElement('p');count.className='muted';count.textContent=items.length+' promemoria da completare';panel.appendChild(count);
+ const tools=document.createElement('div');tools.className='toolbar';if(create)tools.appendChild(create);const all=document.createElement('button');all.type='button';all.className='secondary';all.textContent='Tutti i promemoria';all.onclick=()=>go('reminders');tools.appendChild(all);panel.appendChild(tools);
+ const now=new Date(),end=new Date(now.getFullYear(),now.getMonth(),now.getDate()+1);
+ for(const r of items){const row=document.createElement('div');row.className='item';const date=new Date(r.at),late=date<now,isToday=!late&&date<end;const badge=document.createElement('span');badge.className='lrReminderStatus'+(late?' lrReminderLate':isToday?' lrReminderToday':'');badge.textContent=(late?'Scaduto':isToday?'Oggi':'Programmato')+' · '+date.toLocaleString('it-IT',{dateStyle:'short',timeStyle:'short'});row.appendChild(badge);const text=document.createElement('p');text.textContent=r.text||'';text.style.whiteSpace='pre-wrap';row.appendChild(text);const actions=document.createElement('div');actions.className='toolbar';const edit=document.createElement('button');edit.type='button';edit.className='secondary';edit.textContent='Modifica';edit.onclick=()=>reminderForm('','',r.id);const done=document.createElement('button');done.type='button';done.textContent='Completa';done.onclick=()=>{r.done=true;r.updatedAt=new Date().toISOString();save();redraw()};actions.append(edit,done);row.appendChild(actions);panel.appendChild(row)}
+ if(!items.length){const empty=document.createElement('p');empty.className='muted';empty.textContent='Nessun promemoria da completare per questa scheda.';panel.appendChild(empty)}
+}
+function arrange(kind,id,editNote){
+ const screen=document.getElementById('screen');if(!screen||screen.querySelector('.lrSheetLinks'))return;
+ const panels=Array.from(screen.children).filter(el=>el.classList.contains('panel'));
+ const reminder=panels.find(el=>el.querySelector('h3')?.textContent===(kind==='client'?'Promemoria cliente':'Promemoria mandante'));
+ if(!reminder)return;
+ const stateKey=kind+':'+id;let open=states.get(stateKey);if(!open){open=new Set();states.set(stateKey,open)}
+ if(editNote)open.add('notes');
+ const main=kind==='client'?panels.find(el=>el.querySelector('#clientZone')):null;
+ if(main){const title=document.createElement('div');title.className='lrSheetTitle';const name=main.querySelector('h2');if(name)title.appendChild(name);const p=document.createElement('p');p.textContent=client(selected)?.zone||'Zona da assegnare';title.appendChild(p);screen.insertBefore(title,main)}
+ const heading=kind==='client'?screen.querySelector('.lrSheetTitle'):Array.from(screen.children).find(el=>el.tagName==='H2');
+ if(heading)heading.after(reminder);else screen.prepend(reminder);
+ const redraw=kind==='client'?()=>detail():()=>mandanteDetail(id);
+ remindersPanel(reminder,kind,id,redraw);
+ const links=document.createElement('nav');links.className='lrSheetLinks';links.setAttribute('aria-label','Sezioni della scheda');reminder.after(links);
+ const jump=(target)=>{if(target.tagName==='DETAILS')target.open=true;target.scrollIntoView?.({behavior:'smooth',block:'start'});const focus=target.tagName==='DETAILS'?target.querySelector('summary'):target.querySelector('h3');if(focus){focus.setAttribute('tabindex','-1');focus.focus({preventScroll:true})}};
+ const addLink=(text,target)=>{const b=document.createElement('button');b.type='button';b.className='secondary';b.textContent=text;b.onclick=()=>jump(target);links.appendChild(b)};
+ addLink('Promemoria',reminder);
+ for(const panel of panels){if(panel===reminder)continue;let key,label;
+ if(kind==='client'){
+  if(panel===main){key='data';label='Dati e contatti'}
+  else if(panel.id==='lrInvoiceClientSummary'){key='invoices';label='Fatture e scaduti'}
+  else if(panel.querySelector('#clientMandantiChoices')){key='mandanti';label='Mandanti del cliente'}
+  else if(panel.querySelector('#vnotes')){key='visit';label='Registra visita / ordine'}
+  else if(panel.querySelector('table')){key='history';label='Storico visite e ordini'}
+ }else{
+  if(panel.id==='mdData'){key='data';label='Dati e contatti'}
+  else if(panel.id==='mdNoteForm'){key='notes';label=editNote?'Modifica nota':'Aggiungi nota'}
+  else if(panel.querySelector('#mdHistory')){key='history';label='Storico note'}
+ }
+ if(!key){key='other-'+links.children.length;label=panel.querySelector('h2,h3')?.textContent||'Altri dati'}
+ const section=document.createElement('details');section.className='lrSheetSection';section.dataset.sheetSection=key;section.id='lrSheet-'+key;section.open=open.has(key);
+ const summary=document.createElement('summary');summary.textContent=label;section.appendChild(summary);panel.before(section);section.appendChild(panel);
+ section.addEventListener('toggle',()=>{if(section.open)open.add(key);else open.delete(key)});
+ addLink(label,section);
+ }
+ if(editNote){const field=document.getElementById('mdText');field?.focus({preventScroll:true})}
+}
+const detailBefore=window.detail;window.detail=function(){detailBefore();if(client(selected))arrange('client',selected,false)};
+const mandanteBefore=window.mandanteDetail;window.mandanteDetail=function(id,editId='',...args){mandanteBefore(id,editId,...args);if((db.mandanti||[]).some(m=>String(m.id)===String(id)))arrange('mandante',id,!!editId)};
+})();
+</script>
 </body></html>
